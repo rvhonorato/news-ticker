@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::db::{add_entry_to_db, init_current_entry, init_db};
+use super::db::{add_entry_to_db, init_current_entry, init_db};
 
 /// Reads feed URLs from a file, one per line
 pub fn read_feed_urls(path: &str) -> Result<Vec<String>, String> {

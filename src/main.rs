@@ -1,9 +1,6 @@
-use crate::db::{advance_to_next, get_current, go_to_previous};
-use crate::feed::{Fetcher, read_feed_urls};
 use clap::Parser;
-
-mod db;
-mod feed;
+use news_ticker::db::{advance_to_next, get_current, go_to_previous};
+use news_ticker::feed::{Fetcher, read_feed_urls};
 
 /// News ticker application that fetches and displays RSS feeds
 #[derive(Parser, Debug)]
