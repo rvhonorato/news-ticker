@@ -1,5 +1,8 @@
 # `news-ticker`
 
+![Crates.io Version](https://img.shields.io/crates/v/news-ticker)
+
+
 This is an overly complicated way for me to keep up with the news.
 
 `news-ticker` is a command-line RSS feed reader that fetches news from some
