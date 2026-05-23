@@ -1,0 +1,25 @@
+# Add one URL per line
+
+# Tech
+https://news.ycombinator.com/rss
+https://feeds.arstechnica.com/arstechnica/index
+https://www.phoronix.com/rss.php
+https://archlinux.org/feeds/news/
+
+# Science
+https://www.science.org/rss/news_current.xml
+https://www.nasa.gov/rss/dyn/breaking_news.rss
+
+# Culture
+https://aeon.co/feed.rss
+https://www.thisiscolossal.com/feed/
+https://longreads.com/feed/
+
+# Dutch News
+https://feeds.nos.nl/nosnieuwsalgemeen
+https://www.nu.nl/rss/Algemeen
+https://tweakers.net/feeds/mixed.xml
+https://www.nrc.nl/rss/
+
+# World News
+https://feeds.bbci.co.uk/news/rss.xml

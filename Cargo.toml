@@ -1,0 +1,29 @@
+[package]
+name = "news-ticker"
+version = "0.1.0"
+edition = "2024"
+description = "A CLI news ticker that fetches and displays RSS feeds"
+authors = ["Rodrigo V. Honorato <rvhonorato@pm.me>"]
+license = "0BSD"
+readme = "README.md"
+repository = "https://github.com/rvhonorato/news-ticker"
+homepage = "https://github.com/rvhonorato/news-ticker"
+keywords = ["rss", "news", "cli", "ticker", "feed"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+feed-rs = "2.0"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["json"] }
+sqlx = { version = "0.8", features = [
+  "sqlite",
+  "runtime-tokio",
+  "macros",
+  "chrono",
+] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+strip = true
