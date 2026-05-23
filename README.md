@@ -1,5 +1,6 @@
 # `news-ticker`
 
+[![ci](https://github.com/rvhonorato/news-ticker/actions/workflows/ci.yml/badge.svg)](https://github.com/rvhonorato/news-ticker/actions/workflows/ci.yml)
 ![Crates.io Version](https://img.shields.io/crates/v/news-ticker)
 
 
