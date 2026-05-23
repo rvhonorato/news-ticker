@@ -1,6 +1,6 @@
 [package]
 name = "news-ticker"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A CLI news ticker that fetches and displays RSS feeds"
 authors = ["Rodrigo V. Honorato <rvhonorato@pm.me>"]
