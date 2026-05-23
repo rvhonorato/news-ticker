@@ -1,4 +1,4 @@
-use news_ticker::db::{DbEntry, advance_to_next, get_current, go_to_previous, init_current_entry};
+use news_ticker::db::{DbEntry, advance_to_next, get_current, go_to_previous, init_current_entry, purge_db};
 use sqlx::{Pool, Sqlite, sqlite::SqlitePoolOptions};
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -176,4 +176,42 @@ fn test_db_entry_waybar_display() {
     assert!(display.contains("\"text\""));
     assert!(display.contains("\"class\":\"feed\""));
     assert!(display.contains("Test Title"));
+}
+
+#[tokio::test]
+async fn test_purge_db() {
+    let db = create_test_db().await;
+
+    // Add some entries
+    for i in 0..3 {
+        add_test_entry(
+            &db,
+            &format!("Entry {}", i),
+            &format!("https://test{}.com", i),
+            &format!("Summary {}", i),
+        )
+        .await;
+    }
+
+    // Verify entries exist
+    let count_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entries")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(count_before, 3);
+
+    // Purge the database
+    let purged_count = purge_db(&db).await.unwrap();
+    assert_eq!(purged_count, 3);
+
+    // Verify database is empty
+    let count_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entries")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(count_after, 0);
+
+    // Verify get_current returns None
+    let current = get_current(&db).await.unwrap();
+    assert!(current.is_none());
 }

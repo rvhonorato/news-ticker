@@ -1,5 +1,5 @@
 use clap::Parser;
-use news_ticker::db::{advance_to_next, get_current, go_to_previous};
+use news_ticker::db::{advance_to_next, get_current, go_to_previous, purge_db};
 use news_ticker::feed::{Fetcher, read_feed_urls};
 
 /// News ticker application that fetches and displays RSS feeds
@@ -29,12 +29,24 @@ struct Args {
     /// Show verbose/debug output
     #[arg(long, short)]
     verbose: bool,
+
+    /// Purge/clear all entries from the database
+    #[arg(long)]
+    purge: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
     let mut fetcher = Fetcher::new().await.unwrap();
+
+    // Purge database if explicitly requested
+    if args.purge {
+        let count = purge_db(&fetcher.db).await.unwrap();
+        eprintln!("Purged {} entries from database", count);
+
+        std::process::exit(0);
+    }
 
     // Refresh feed data if explicitly requested
     if let Some(feeds_file) = args.refresh {

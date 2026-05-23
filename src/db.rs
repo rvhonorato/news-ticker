@@ -220,6 +220,21 @@ pub async fn init_current_entry(db: &Pool<Sqlite>) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove all entries from the database
+pub async fn purge_db(db: &Pool<Sqlite>) -> Result<usize, String> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entries")
+        .fetch_one(db)
+        .await
+        .map_err(|e| format!("Failed to count entries: {}", e))?;
+
+    sqlx::query("DELETE FROM entries")
+        .execute(db)
+        .await
+        .map_err(|e| format!("Failed to purge entries: {}", e))?;
+
+    Ok(count as usize)
+}
+
 /// Go to the previous entry as current. Returns the new current entry as DbEntry.
 /// If no current entry exists, sets the last entry (highest id) as current.
 /// If at the first entry, wraps around to the last.
