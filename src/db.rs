@@ -39,9 +39,14 @@ impl DbEntry {
 }
 
 pub async fn init_db() -> Result<Pool<Sqlite>, String> {
-    let current_dir =
-        std::env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
-    let db_path = current_dir.join("db.sqlite");
+    let home_dir = std::env::var("HOME")
+        .map_err(|e| format!("Failed to get HOME directory: {}", e))?;
+    let cache_dir = std::path::Path::new(&home_dir).join(".cache/news-ticker");
+    let db_path = cache_dir.join("db.sqlite");
+
+    // Create cache directory if it doesn't exist
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create cache directory: {}", e))?;
 
     // Use sqlite:// URL with mode=rwc (read, write, create) to ensure file is created
     let connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
