@@ -1,6 +1,9 @@
 use clap::Parser;
 use news_ticker::db::{advance_to_next, get_current, go_to_previous, purge_db};
 use news_ticker::feed::{Fetcher, read_feed_urls};
+use tracing::{info, warn};
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::fmt::SubscriberBuilder;
 
 /// News ticker application that fetches and displays RSS feeds
 #[derive(Parser, Debug)]
@@ -26,9 +29,9 @@ struct Args {
     #[arg(long, value_name = "FILE")]
     refresh: Option<String>,
 
-    /// Show verbose/debug output
-    #[arg(long, short)]
-    verbose: bool,
+    /// Show verbose/debug output (can be specifiedmultiple times for more verbosity)
+    #[arg(long, short, action = clap::ArgAction::Count)]
+    verbose: u8,
 
     /// Purge/clear all entries from the database
     #[arg(long)]
@@ -37,44 +40,45 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
+    let verbose = std::env::args().any(|arg| arg == "-v" || arg == "--verbose");
+
+    let builder = SubscriberBuilder::default();
+    let builder = if verbose {
+        builder.with_max_level(LevelFilter::DEBUG)
+    } else {
+        builder.with_max_level(LevelFilter::WARN)
+    };
+
+    builder.init();
+
     let args = Args::parse();
     let mut fetcher = Fetcher::new().await.unwrap();
 
-    // Purge database if explicitly requested
     if args.purge {
         let count = purge_db(&fetcher.db).await.unwrap();
-        eprintln!("Purged {} entries from database", count);
-
+        info!("Purged {} entries from database", count);
         std::process::exit(0);
     }
 
-    // Refresh feed data if explicitly requested
     if let Some(feeds_file) = args.refresh {
         let urls = read_feed_urls(&feeds_file).expect("Failed to read feeds file");
         let new_inserts = fetcher.refresh_with_urls(urls).await.unwrap();
-        eprintln!("Refreshed feed data - added {} new entries", new_inserts);
-
+        info!("Refreshed feed data - added {} new entries", new_inserts);
         std::process::exit(0);
     }
 
-    // Get the current entry
     let current = get_current(&fetcher.db).await.unwrap();
 
     match current {
         Some(db_entry) => {
-            // Handle display based on arguments
             if args.link {
-                // Display only the link
                 println!("{}", db_entry.link);
             } else if args.waybar {
-                // Output Waybar JSON format
                 println!("{}", db_entry.display_waybar());
             } else if !args.next && !args.previous {
-                // Normal display
                 println!("{}", db_entry.display());
             }
 
-            // Handle navigation
             if args.next {
                 let _ = advance_to_next(&fetcher.db).await.unwrap();
             } else if args.previous {
@@ -83,7 +87,7 @@ async fn main() {
         }
         None => {
             if !args.next && !args.previous {
-                eprintln!("No entries in database!");
+                warn!("No entries in database!");
             }
         }
     }
