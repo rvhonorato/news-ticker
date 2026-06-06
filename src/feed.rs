@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use super::db::{add_entry_to_db, init_current_entry, init_db};
+use tracing::{debug, info, warn};
 
 /// Reads feed URLs from a file, one per line
 pub fn read_feed_urls(path: &str) -> Result<Vec<String>, String> {
@@ -59,17 +60,23 @@ impl Fetcher {
     }
 
     pub async fn refresh_with_urls(&mut self, urls: Vec<String>) -> Result<usize, String> {
+        info!("Starting feed refresh for {} URLs", urls.len());
         let mut all_entries = Vec::new();
         for url in &urls {
             match self.fetch_feed(url).await {
-                Ok(mut entries) => all_entries.append(&mut entries),
-                Err(e) => eprintln!("Failed to fetch {}: {}", url, e),
+                Ok(mut entries) => {
+                    debug!("Fetched {} entries from {}", entries.len(), url);
+                    all_entries.append(&mut entries);
+                }
+                Err(e) => {
+                    warn!("Failed to fetch {}: {}", url, e);
+                }
             }
         }
 
         self.entries = all_entries.clone();
+        info!("Total entries collected: {}", self.entries.len());
 
-        // Save entries to database, tracking new inserts
         let mut new_inserts = 0;
         for entry in &all_entries {
             if add_entry_to_db(&self.db, entry).await? {
@@ -77,13 +84,16 @@ impl Fetcher {
             }
         }
 
-        // Initialize current entry if this is the first time
+        // Initialize current entry after adding new entries
         init_current_entry(&self.db).await?;
+
+        info!("Feed refresh complete: {} new entries added", new_inserts);
 
         Ok(new_inserts)
     }
 
     async fn fetch_feed(&self, url: &str) -> Result<Vec<Entry>, String> {
+        debug!("Fetching feed from {}", url);
         let resp = self
             .client
             .get(url)

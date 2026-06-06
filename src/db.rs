@@ -1,6 +1,9 @@
 use feed_rs::model::Entry;
 use sqlx::{Pool, Sqlite, sqlite::SqlitePoolOptions};
 
+use crate::filter::get_filter;
+use tracing::{debug, warn};
+
 /// A simplified entry from the database
 #[derive(Debug, Clone)]
 pub struct DbEntry {
@@ -39,8 +42,8 @@ impl DbEntry {
 }
 
 pub async fn init_db() -> Result<Pool<Sqlite>, String> {
-    let home_dir = std::env::var("HOME")
-        .map_err(|e| format!("Failed to get HOME directory: {}", e))?;
+    let home_dir =
+        std::env::var("HOME").map_err(|e| format!("Failed to get HOME directory: {}", e))?;
     let cache_dir = std::path::Path::new(&home_dir).join(".cache/news-ticker");
     let db_path = cache_dir.join("db.sqlite");
 
@@ -105,6 +108,28 @@ pub async fn add_entry_to_db(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, S
         .map(|s| s.content.clone())
         .unwrap_or_default();
 
+    debug!("Processing entry - link: {}", link);
+
+    // Check if title contains offensive content and add [TW] label if needed
+    let filter = get_filter();
+    debug!("Checking content filter for: {}", title);
+    let title_with_label = match filter.is_offensive(&title).await {
+        Ok(is_offensive) => {
+            debug!("Classification completed: is_offensive={}", is_offensive);
+            if is_offensive {
+                warn!("Offensive content detected: {}", &title);
+                "[TW] ".to_string() + &title
+            } else {
+                title
+            }
+        }
+        Err(e) => {
+            warn!("Content filter error for '{}': {}", title, e);
+            // On error, keep original title (fail-safe)
+            title
+        }
+    };
+
     // Use INSERT OR IGNORE to skip duplicates (based on unique link)
     let result = sqlx::query(
         r#"
@@ -112,7 +137,7 @@ pub async fn add_entry_to_db(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, S
                 VALUES (?, ?, ?)
                 "#,
     )
-    .bind(title)
+    .bind(title_with_label)
     .bind(link)
     .bind(summary)
     .execute(db)

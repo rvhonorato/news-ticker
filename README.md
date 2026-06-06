@@ -9,9 +9,44 @@ This is an overly complicated way for me to keep up with the news.
 feeds, stores entries in a local SQLite database, and displays them one at a
 time.
 
-It supports navigation between entries, Waybar status bar integration, and
-URL-only output for scripting workflows. Feed URLs are read from a plain text
-file (one per line), and the database persists fetched entries between runs.
+## Content Filter ( Offensive Content Detection )
+
+By default, news-ticker includes an optional content filter that uses Ollama to
+detect potentially offensive or distressing content in news titles. When
+offensive content is detected, the title is prefixed with `[TW]` (Trigger Warning).
+
+### How It Works
+
+- The content filter uses a local Ollama instance with a language model
+- If Ollama is not available or the model fails to load, the filter is **skipped
+  automatically** and news is displayed without filtering
+- By default, it uses the `llama3.2:3b` model
+
+### Configuration
+
+The content filter looks for Ollama running on `http://localhost:11434` by
+default. If your Ollama instance is on a different host or port, set the
+`OLLAMA_ENDPOINT` environment variable:
+
+```sh
+OLLAMA_ENDPOINT=http://your-host:port news-ticker --refresh feeds.txt
+```
+
+### Model Requirements
+
+Any Ollama model can be used, but it should be fine-tuned or capable of binary
+classification. The filter works best with models that can respond with short,
+deterministic output.
+
+To use the default model (`llama3.2:3b`), ensure it's pulled in Ollama:
+
+```sh
+ollama pull llama3.2:3b
+```
+
+### Content Classification Criteria
+
+See the PROMPT inside `filter::build_classification_prompt` for more details.
 
 ## Usage
 
@@ -51,6 +86,16 @@ Delete all entries:
 ```sh
 news-ticker --purge
 ```
+
+### Verbose Mode
+
+For debugging content filter issues, use the `-v` flag:
+
+```sh
+news-ticker -v --refresh feeds.txt
+```
+
+This shows detailed logs about content classification and any errors from Ollama.
 
 ## Waybar Integration
 
