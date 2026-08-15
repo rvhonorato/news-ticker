@@ -1,7 +1,7 @@
+use crate::filter::ContentFilter;
 use feed_rs::model::Entry;
 use sqlx::{Pool, Sqlite, sqlite::SqlitePoolOptions};
 
-use crate::filter::get_filter;
 use tracing::{debug, warn};
 
 /// A simplified entry from the database
@@ -91,7 +91,11 @@ pub async fn init_db() -> Result<Pool<Sqlite>, String> {
 }
 
 /// Adds an entry to the database. Returns true if inserted, false if duplicate was ignored.
-pub async fn add_entry_to_db(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, String> {
+pub async fn add_entry_to_db(
+    db: &Pool<Sqlite>,
+    entry: &Entry,
+    filter: Option<&ContentFilter>,
+) -> Result<bool, String> {
     let title = entry
         .title
         .as_ref()
@@ -111,23 +115,26 @@ pub async fn add_entry_to_db(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, S
     debug!("Processing entry - link: {}", link);
 
     // Check if title contains offensive content and add [TW] label if needed
-    let filter = get_filter();
-    debug!("Checking content filter for: {}", title);
-    let title_with_label = match filter.is_offensive(&title).await {
-        Ok(is_offensive) => {
-            debug!("Classification completed: is_offensive={}", is_offensive);
-            if is_offensive {
-                warn!("Offensive content detected: {}", &title);
-                "[TW] ".to_string() + &title
-            } else {
+    let title_with_label = if let Some(filter) = &filter {
+        debug!("Checking content filter for: {}", title);
+        match filter.is_offensive(&title).await {
+            Ok(is_offensive) => {
+                debug!("Classification completed: is_offensive={}", is_offensive);
+                if is_offensive {
+                    warn!("Offensive content detected: {}", &title);
+                    "[TW] ".to_string() + &title
+                } else {
+                    title
+                }
+            }
+            Err(e) => {
+                warn!("Content filter error for '{}': {}", title, e);
+                // On error, keep original title (fail-safe)
                 title
             }
         }
-        Err(e) => {
-            warn!("Content filter error for '{}': {}", title, e);
-            // On error, keep original title (fail-safe)
-            title
-        }
+    } else {
+        title
     };
 
     // Use INSERT OR IGNORE to skip duplicates (based on unique link)

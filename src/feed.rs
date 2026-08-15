@@ -5,6 +5,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use crate::filter::ContentFilter;
+
 use super::db::{add_entry_to_db, init_current_entry, init_db};
 use tracing::{debug, info, warn};
 
@@ -44,18 +46,22 @@ pub struct Fetcher {
     client: Client,
     pub db: SqlitePool,
     pub entries: Vec<Entry>,
+    filter: Option<ContentFilter>,
 }
 
 impl Fetcher {
-    pub async fn new() -> Result<Self, String> {
+    pub async fn new(model: Option<String>) -> Result<Self, String> {
         let db = init_db()
             .await
             .map_err(|e| format!("DB init error: {}", e))?;
+
+        let filter = model.map(|m| ContentFilter::new(m).unwrap());
 
         Ok(Self {
             client: Client::new(),
             db,
             entries: Vec::new(),
+            filter,
         })
     }
 
@@ -79,7 +85,7 @@ impl Fetcher {
 
         let mut new_inserts = 0;
         for entry in &all_entries {
-            if add_entry_to_db(&self.db, entry).await? {
+            if add_entry_to_db(&self.db, entry, self.filter.as_ref()).await? {
                 new_inserts += 1;
             }
         }

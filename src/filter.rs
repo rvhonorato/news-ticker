@@ -5,18 +5,7 @@ use ollama_rs::generation::completion::GenerationResponse;
 use ollama_rs::generation::completion::request::GenerationRequest;
 use ollama_rs::models::ModelOptions;
 use std::error::Error;
-use std::sync::OnceLock;
 use tracing::{debug, info};
-use url::Url;
-
-/// Default Ollama host
-const DEFAULT_OLLAMA_HOST: &str = "localhost";
-
-/// Default Ollama port
-const DEFAULT_OLLAMA_PORT: u16 = 11434;
-
-/// Default model for content filtering (small, fast, good for classification)
-const DEFAULT_FILTER_MODEL: &str = "llama3.2:3b";
 
 /// Classification result
 #[derive(Debug, Clone, PartialEq)]
@@ -43,41 +32,13 @@ pub struct ContentFilter {
 
 impl ContentFilter {
     /// Create a new content filter with default settings
-    pub fn new() -> Result<Self, Box<dyn Error>> {
+    pub fn new(model: String) -> Result<Self, Box<dyn Error>> {
         info!("Initializing content filter with default settings");
-        Self::with_endpoint_and_model(
-            DEFAULT_OLLAMA_HOST.to_string(),
-            DEFAULT_OLLAMA_PORT,
-            DEFAULT_FILTER_MODEL.to_string(),
-        )
-    }
 
-    /// Create a new content filter with custom endpoint and model
-    pub fn with_endpoint_and_model(
-        host: String,
-        port: u16,
-        model: String,
-    ) -> Result<Self, Box<dyn Error>> {
-        let url = Url::parse(&format!("http://{}:{}", host, port))?;
-        debug!("Creating content filter: endpoint={}, model={}", url, model);
         Ok(Self {
-            ollama: Ollama::try_new(url)?,
+            ollama: Ollama::try_new("http://localhost:11434")?,
             model,
         })
-    }
-
-    /// Create a new content filter from a full URL
-    pub fn from_url(url: String, model: String) -> Result<Self, Box<dyn Error>> {
-        let parsed_url = Url::parse(&url)?;
-        let host = parsed_url
-            .host_str()
-            .ok_or("Invalid URL: no host")?
-            .to_string();
-        let port = parsed_url
-            .port_or_known_default()
-            .unwrap_or(DEFAULT_OLLAMA_PORT);
-
-        Self::with_endpoint_and_model(host, port, model)
     }
 
     /// Check if Ollama is running and accessible
@@ -165,80 +126,6 @@ impl ContentFilter {
     }
 }
 
-/// Global content filter instance (lazy initialization)
-pub fn get_filter() -> &'static ContentFilter {
-    static FILTER: OnceLock<ContentFilter> = OnceLock::new();
-    FILTER.get_or_init(|| ContentFilter::new().expect("Failed to create content filter"))
-}
-
-/// Initialize a content filter with custom settings
-///
-/// Accepts optional host, port, and model. If not provided, uses defaults.
-/// Returns the initialized ContentFilter or an error.
-pub fn init_filter(
-    endpoint: Option<String>,
-    model: Option<String>,
-) -> Result<ContentFilter, Box<dyn Error>> {
-    match endpoint {
-        Some(url) => {
-            // Try to parse as a full URL first
-            if let Ok(parsed) = Url::parse(&url) {
-                let host = parsed.host_str().ok_or("Invalid URL: no host")?.to_string();
-                let port = parsed
-                    .port_or_known_default()
-                    .unwrap_or(DEFAULT_OLLAMA_PORT);
-                let model = model.unwrap_or_else(|| DEFAULT_FILTER_MODEL.to_string());
-                debug!("Initializing filter with URL: {} (model: {})", url, model);
-                ContentFilter::with_endpoint_and_model(host, port, model)
-            } else {
-                // Fall back to treating as host with default port
-                let host = url;
-                let port = DEFAULT_OLLAMA_PORT;
-                let model = model.unwrap_or_else(|| DEFAULT_FILTER_MODEL.to_string());
-                debug!(
-                    "Initializing filter with host: {}:{}/ (model: {})",
-                    host, port, model
-                );
-                ContentFilter::with_endpoint_and_model(host, port, model)
-            }
-        }
-        None => {
-            let model = model.unwrap_or_else(|| DEFAULT_FILTER_MODEL.to_string());
-            info!(
-                "Initializing filter with default settings (model: {})",
-                model
-            );
-            ContentFilter::with_endpoint_and_model(
-                DEFAULT_OLLAMA_HOST.to_string(),
-                DEFAULT_OLLAMA_PORT,
-                model,
-            )
-        }
-    }
-}
-
-/// Parse an endpoint string (URL, host:port, or just host) and return (host, port)
-pub fn parse_endpoint(endpoint: &str) -> Result<(String, u16), Box<dyn Error>> {
-    // Try to parse as a full URL first
-    if let Ok(parsed) = Url::parse(endpoint) {
-        let host = parsed.host_str().ok_or("Invalid URL: no host")?.to_string();
-        let port = parsed
-            .port_or_known_default()
-            .unwrap_or(DEFAULT_OLLAMA_PORT);
-        return Ok((host, port));
-    }
-
-    // Try to parse as host:port (without protocol)
-    if let Some((host, port_str)) = endpoint.rsplit_once(':')
-        && let Ok(port) = port_str.parse::<u16>()
-    {
-        return Ok((host.to_string(), port));
-    }
-
-    // Assume it's just a host, use default port
-    Ok((endpoint.to_string(), DEFAULT_OLLAMA_PORT))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,48 +138,25 @@ mod tests {
 
     #[test]
     fn test_filter_creation() {
-        let filter = ContentFilter::new().unwrap();
+        let filter = ContentFilter::new("model-id".to_string()).unwrap();
         assert_eq!(filter.endpoint(), "http://localhost:11434/");
-        assert_eq!(filter.model(), DEFAULT_FILTER_MODEL);
+        assert_eq!(filter.model(), "model-id".to_string());
     }
 
     #[test]
     fn test_custom_filter() {
-        let filter = ContentFilter::with_endpoint_and_model(
-            "custom".to_string(),
-            11434,
-            "custom-model".to_string(),
-        )
-        .unwrap();
+        let filter = ContentFilter::new("custom-model".to_string()).unwrap();
         assert_eq!(filter.endpoint(), "http://custom:11434/");
         assert_eq!(filter.model(), "custom-model");
     }
 
     #[test]
     fn test_prompt_building() {
-        let filter = ContentFilter::new().unwrap();
+        let filter = ContentFilter::new("something".to_string()).unwrap();
         let text = "Test news headline";
         let prompt = filter.build_classification_prompt(text);
 
         assert!(prompt.contains("Test news headline"));
         assert!(prompt.contains("OFFENSIVE or SAFE"));
-    }
-
-    #[test]
-    fn test_parse_endpoint() {
-        // Test full URL
-        let (host, port) = parse_endpoint("http://localhost:8080").unwrap();
-        assert_eq!(host, "localhost");
-        assert_eq!(port, 8080);
-
-        // Test host only
-        let (host, port) = parse_endpoint("localhost").unwrap();
-        assert_eq!(host, "localhost");
-        assert_eq!(port, DEFAULT_OLLAMA_PORT);
-
-        // Test host with port
-        let (host, port) = parse_endpoint("192.168.1.1:9000").unwrap();
-        assert_eq!(host, "192.168.1.1");
-        assert_eq!(port, 9000);
     }
 }

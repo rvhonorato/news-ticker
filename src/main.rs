@@ -36,6 +36,10 @@ struct Args {
     /// Purge/clear all entries from the database
     #[arg(long)]
     purge: bool,
+
+    /// Model to be used
+    #[arg(long)]
+    model: Option<String>,
 }
 
 #[tokio::main]
@@ -52,7 +56,7 @@ async fn main() {
     builder.init();
 
     let args = Args::parse();
-    let mut fetcher = Fetcher::new().await.unwrap();
+    let mut fetcher = Fetcher::new(args.model).await.unwrap();
 
     if args.purge {
         let count = purge_db(&fetcher.db).await.unwrap();
