@@ -11,25 +11,25 @@ time.
 
 ## Content Filter ( Offensive Content Detection )
 
-By default, news-ticker includes an optional content filter that uses Ollama to
-detect potentially offensive or distressing content in news titles. When
-offensive content is detected, the title is prefixed with `[TW]` (Trigger Warning).
+news-ticker includes an optional content filter that uses Ollama to detect
+potentially offensive or distressing content in news titles. When offensive
+content is detected, the title is prefixed with `[TW]` (Trigger Warning).
 
 ### How It Works
 
 - The content filter uses a local Ollama instance with a language model
+- It is **opt-in**: pass `--model <MODEL>` to enable it. Without `--model`,
+  no filtering is applied
 - If Ollama is not available or the model fails to load, the filter is **skipped
   automatically** and news is displayed without filtering
-- By default, it uses the `llama3.2:3b` model
 
 ### Configuration
 
-The content filter looks for Ollama running on `http://localhost:11434` by
-default. If your Ollama instance is on a different host or port, set the
-`OLLAMA_ENDPOINT` environment variable:
+The content filter connects to Ollama on `http://localhost:11434` (not
+currently configurable). Specify which model to use via the `--model` flag:
 
 ```sh
-OLLAMA_ENDPOINT=http://your-host:port news-ticker --refresh feeds.txt
+news-ticker --model llama3.2:3b --refresh feeds.txt
 ```
 
 ### Model Requirements
@@ -38,7 +38,7 @@ Any Ollama model can be used, but it should be fine-tuned or capable of binary
 classification. The filter works best with models that can respond with short,
 deterministic output.
 
-To use the default model (`llama3.2:3b`), ensure it's pulled in Ollama:
+Make sure the model is pulled in Ollama before using it:
 
 ```sh
 ollama pull llama3.2:3b
@@ -54,6 +54,12 @@ Refresh feed data from a file (one URL per line):
 
 ```sh
 news-ticker --refresh feeds.txt
+```
+
+Refresh with content filtering enabled, using a specific Ollama model:
+
+```sh
+news-ticker --model llama3.2:3b --refresh feeds.txt
 ```
 
 Display the current news entry:
