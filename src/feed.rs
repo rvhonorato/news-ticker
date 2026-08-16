@@ -5,9 +5,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use crate::filter::ContentFilter;
-
-use super::db::{add_entry_to_db, init_current_entry, init_db};
+use super::db::{add_entry_to_db, init_current_entry};
 use tracing::{debug, info, warn};
 
 /// Reads feed URLs from a file, one per line
@@ -46,26 +44,18 @@ pub struct Fetcher {
     client: Client,
     pub db: SqlitePool,
     pub entries: Vec<Entry>,
-    filter: Option<ContentFilter>,
 }
 
 impl Fetcher {
-    pub async fn new(model: Option<String>) -> Result<Self, String> {
-        let db = init_db()
-            .await
-            .map_err(|e| format!("DB init error: {}", e))?;
-
-        let filter = model.map(|m| ContentFilter::new(m).unwrap());
-
-        Ok(Self {
+    pub fn new(db: SqlitePool) -> Self {
+        Self {
             client: Client::new(),
             db,
             entries: Vec::new(),
-            filter,
-        })
+        }
     }
 
-    pub async fn refresh_with_urls(&mut self, urls: Vec<String>) -> Result<usize, String> {
+    pub async fn refresh(&mut self, urls: Vec<String>) -> Result<Vec<Entry>, String> {
         info!("Starting feed refresh for {} URLs", urls.len());
         let mut all_entries = Vec::new();
         for url in &urls {
@@ -83,19 +73,22 @@ impl Fetcher {
         self.entries = all_entries.clone();
         info!("Total entries collected: {}", self.entries.len());
 
-        let mut new_inserts = 0;
-        for entry in &all_entries {
-            if add_entry_to_db(&self.db, entry, self.filter.as_ref()).await? {
-                new_inserts += 1;
+        let mut new_entries = Vec::<Entry>::new();
+        for entry in all_entries {
+            if add_entry_to_db(&self.db, &entry).await? {
+                new_entries.push(entry);
             }
         }
 
         // Initialize current entry after adding new entries
         init_current_entry(&self.db).await?;
 
-        info!("Feed refresh complete: {} new entries added", new_inserts);
+        info!(
+            "Feed refresh complete: {} new entries added",
+            new_entries.len()
+        );
 
-        Ok(new_inserts)
+        Ok(new_entries)
     }
 
     async fn fetch_feed(&self, url: &str) -> Result<Vec<Entry>, String> {

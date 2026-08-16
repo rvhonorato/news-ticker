@@ -1,8 +1,7 @@
-use crate::filter::ContentFilter;
 use feed_rs::model::Entry;
 use sqlx::{Pool, Sqlite, sqlite::SqlitePoolOptions};
 
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// A simplified entry from the database
 #[derive(Debug, Clone)]
@@ -10,21 +9,27 @@ pub struct DbEntry {
     pub title: String,
     pub link: String,
     pub summary: String,
+    pub is_offensive: bool,
 }
 
 impl DbEntry {
-    pub fn new(title: String, link: String, summary: String) -> Self {
+    pub fn new(title: String, link: String, summary: String, is_offensive: bool) -> Self {
         Self {
             title,
             link,
             summary,
+            is_offensive,
         }
     }
 }
 
 impl DbEntry {
     pub fn display(&self) -> String {
-        format!("📰 {}\n   {}\n   {}", self.title, self.link, self.summary)
+        let prefix = if self.is_offensive { "[TW] " } else { "" };
+        format!(
+            "📰 {}{}\n   {}\n   {}",
+            prefix, self.title, self.link, self.summary
+        )
     }
 
     pub fn display_waybar(&self) -> String {
@@ -37,19 +42,27 @@ impl DbEntry {
             .replace('\r', "\\r")
             .replace('\t', "\\t");
 
-        format!(r#"{{"text":"{}","class":"feed"}}"#, escaped_title)
+        let prefix = if self.is_offensive { "[TW] " } else { "" };
+
+        format!(r#"{{"text":"{}{}","class":"feed"}}"#, prefix, escaped_title)
     }
 }
 
 pub async fn init_db() -> Result<Pool<Sqlite>, String> {
-    let home_dir =
-        std::env::var("HOME").map_err(|e| format!("Failed to get HOME directory: {}", e))?;
-    let cache_dir = std::path::Path::new(&home_dir).join(".cache/news-ticker");
-    let db_path = cache_dir.join("db.sqlite");
+    let db_path = match std::env::var("NEWS_TICKER_DB") {
+        Ok(path) => std::path::PathBuf::from(path),
+        Err(_) => {
+            let home_dir = std::env::var("HOME")
+                .map_err(|e| format!("Failed to get HOME directory: {}", e))?;
+            std::path::Path::new(&home_dir).join(".cache/news-ticker/db.sqlite")
+        }
+    };
 
-    // Create cache directory if it doesn't exist
-    std::fs::create_dir_all(&cache_dir)
-        .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+    // Create the db's parent directory if it doesn't exist
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create db directory: {}", e))?;
+    }
 
     // Use sqlite:// URL with mode=rwc (read, write, create) to ensure file is created
     let connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
@@ -74,6 +87,7 @@ pub async fn init_db() -> Result<Pool<Sqlite>, String> {
                 link TEXT NOT NULL UNIQUE,
                 summary TEXT,
                 current BOOLEAN DEFAULT 0,
+                is_offensive BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             "#,
@@ -91,11 +105,7 @@ pub async fn init_db() -> Result<Pool<Sqlite>, String> {
 }
 
 /// Adds an entry to the database. Returns true if inserted, false if duplicate was ignored.
-pub async fn add_entry_to_db(
-    db: &Pool<Sqlite>,
-    entry: &Entry,
-    filter: Option<&ContentFilter>,
-) -> Result<bool, String> {
+pub async fn add_entry_to_db(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, String> {
     let title = entry
         .title
         .as_ref()
@@ -114,29 +124,6 @@ pub async fn add_entry_to_db(
 
     debug!("Processing entry - link: {}", link);
 
-    // Check if title contains offensive content and add [TW] label if needed
-    let title_with_label = if let Some(filter) = &filter {
-        debug!("Checking content filter for: {}", title);
-        match filter.is_offensive(&title).await {
-            Ok(is_offensive) => {
-                debug!("Classification completed: is_offensive={}", is_offensive);
-                if is_offensive {
-                    warn!("Offensive content detected: {}", &title);
-                    "[TW] ".to_string() + &title
-                } else {
-                    title
-                }
-            }
-            Err(e) => {
-                warn!("Content filter error for '{}': {}", title, e);
-                // On error, keep original title (fail-safe)
-                title
-            }
-        }
-    } else {
-        title
-    };
-
     // Use INSERT OR IGNORE to skip duplicates (based on unique link)
     let result = sqlx::query(
         r#"
@@ -144,7 +131,7 @@ pub async fn add_entry_to_db(
                 VALUES (?, ?, ?)
                 "#,
     )
-    .bind(title_with_label)
+    .bind(title)
     .bind(link)
     .bind(summary)
     .execute(db)
@@ -157,14 +144,16 @@ pub async fn add_entry_to_db(
 
 /// Get the current entry (where current = 1), ordered by id
 pub async fn get_current(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String> {
-    let row: Option<(String, String, String)> = sqlx::query_as(
-        r#"SELECT title, link, summary FROM entries WHERE current = 1 ORDER BY id ASC LIMIT 1"#,
+    let row: Option<(String, String, String, bool)> = sqlx::query_as(
+        r#"SELECT title, link, summary, is_offensive FROM entries WHERE current = 1 ORDER BY id ASC LIMIT 1"#,
     )
     .fetch_optional(db)
     .await
     .map_err(|e| format!("Failed to fetch current entry: {}", e))?;
 
-    Ok(row.map(|(title, link, summary)| DbEntry::new(title, link, summary)))
+    Ok(row.map(|(title, link, summary, is_offensive)| {
+        DbEntry::new(title, link, summary, is_offensive)
+    }))
 }
 
 /// Set the next entry as current. Returns the new current entry as DbEntry.
@@ -172,9 +161,9 @@ pub async fn get_current(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String> {
 /// If at the last entry, wraps around to the first.
 pub async fn advance_to_next(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String> {
     // Get the next entry (by id), or wrap around to first if at the end
-    let next_entry: Option<(i64, String, String, String)> = sqlx::query_as(
-        r#"SELECT id, title, link, summary FROM entries 
-           WHERE id > COALESCE((SELECT id FROM entries WHERE current = 1 LIMIT 1), 0) 
+    let next_entry: Option<(i64, String, String, String, bool)> = sqlx::query_as(
+        r#"SELECT id, title, link, summary, is_offensive FROM entries
+           WHERE id > COALESCE((SELECT id FROM entries WHERE current = 1 LIMIT 1), 0)
            ORDER BY id ASC LIMIT 1"#,
     )
     .fetch_optional(db)
@@ -182,7 +171,7 @@ pub async fn advance_to_next(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, Strin
     .map_err(|e| format!("Failed to fetch next entry: {}", e))?;
 
     match next_entry {
-        Some((next_id, title, link, summary)) => {
+        Some((next_id, title, link, summary, is_offensive)) => {
             // Clear all current flags
             sqlx::query("UPDATE entries SET current = 0")
                 .execute(db)
@@ -196,19 +185,19 @@ pub async fn advance_to_next(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, Strin
                 .await
                 .map_err(|e| format!("Failed to set next current: {}", e))?;
 
-            Ok(Some(DbEntry::new(title, link, summary)))
+            Ok(Some(DbEntry::new(title, link, summary, is_offensive)))
         }
         None => {
             // No next entry found, wrap around to first entry
-            let first: Option<(i64, String, String, String)> = sqlx::query_as(
-                r#"SELECT id, title, link, summary FROM entries ORDER BY id ASC LIMIT 1"#,
+            let first: Option<(i64, String, String, String, bool)> = sqlx::query_as(
+                r#"SELECT id, title, link, summary, is_offensive FROM entries ORDER BY id ASC LIMIT 1"#,
             )
             .fetch_optional(db)
             .await
             .map_err(|e| format!("Failed to fetch first entry: {}", e))?;
 
             match first {
-                Some((first_id, title, link, summary)) => {
+                Some((first_id, title, link, summary, is_offensive)) => {
                     // Clear all current flags
                     sqlx::query("UPDATE entries SET current = 0")
                         .execute(db)
@@ -222,7 +211,7 @@ pub async fn advance_to_next(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, Strin
                         .await
                         .map_err(|e| format!("Failed to set first as current: {}", e))?;
 
-                    Ok(Some(DbEntry::new(title, link, summary)))
+                    Ok(Some(DbEntry::new(title, link, summary, is_offensive)))
                 }
                 None => Ok(None), // No entries at all
             }
@@ -272,9 +261,9 @@ pub async fn purge_db(db: &Pool<Sqlite>) -> Result<usize, String> {
 /// If at the first entry, wraps around to the last.
 pub async fn go_to_previous(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String> {
     // Get the previous entry (by id), or wrap around to last if at the beginning
-    let prev_entry: Option<(i64, String, String, String)> = sqlx::query_as(
-        r#"SELECT id, title, link, summary FROM entries 
-           WHERE id < COALESCE((SELECT id FROM entries WHERE current = 1 LIMIT 1), (SELECT MAX(id) + 1 FROM entries)) 
+    let prev_entry: Option<(i64, String, String, String, bool)> = sqlx::query_as(
+        r#"SELECT id, title, link, summary, is_offensive FROM entries
+           WHERE id < COALESCE((SELECT id FROM entries WHERE current = 1 LIMIT 1), (SELECT MAX(id) + 1 FROM entries))
            ORDER BY id DESC LIMIT 1"#,
     )
     .fetch_optional(db)
@@ -282,7 +271,7 @@ pub async fn go_to_previous(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String
     .map_err(|e| format!("Failed to fetch previous entry: {}", e))?;
 
     match prev_entry {
-        Some((prev_id, title, link, summary)) => {
+        Some((prev_id, title, link, summary, is_offensive)) => {
             // Clear all current flags
             sqlx::query("UPDATE entries SET current = 0")
                 .execute(db)
@@ -296,19 +285,19 @@ pub async fn go_to_previous(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String
                 .await
                 .map_err(|e| format!("Failed to set previous current: {}", e))?;
 
-            Ok(Some(DbEntry::new(title, link, summary)))
+            Ok(Some(DbEntry::new(title, link, summary, is_offensive)))
         }
         None => {
             // No previous entry found, wrap around to last entry
-            let last: Option<(i64, String, String, String)> = sqlx::query_as(
-                r#"SELECT id, title, link, summary FROM entries ORDER BY id DESC LIMIT 1"#,
+            let last: Option<(i64, String, String, String, bool)> = sqlx::query_as(
+                r#"SELECT id, title, link, summary, is_offensive FROM entries ORDER BY id DESC LIMIT 1"#,
             )
             .fetch_optional(db)
             .await
             .map_err(|e| format!("Failed to fetch last entry: {}", e))?;
 
             match last {
-                Some((last_id, title, link, summary)) => {
+                Some((last_id, title, link, summary, is_offensive)) => {
                     // Clear all current flags
                     sqlx::query("UPDATE entries SET current = 0")
                         .execute(db)
@@ -322,10 +311,32 @@ pub async fn go_to_previous(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String
                         .await
                         .map_err(|e| format!("Failed to set last as current: {}", e))?;
 
-                    Ok(Some(DbEntry::new(title, link, summary)))
+                    Ok(Some(DbEntry::new(title, link, summary, is_offensive)))
                 }
                 None => Ok(None), // No entries at all
             }
         }
     }
+}
+
+/// Mark an entry as offensive (or not) by looking up its link
+pub async fn set_offensive(
+    db: &Pool<Sqlite>,
+    entry: &Entry,
+    is_offensive: bool,
+) -> Result<(), String> {
+    let link = entry
+        .links
+        .first()
+        .map(|l| l.href.clone())
+        .unwrap_or_default();
+
+    sqlx::query("UPDATE entries SET is_offensive = ? WHERE link = ?")
+        .bind(is_offensive)
+        .bind(link)
+        .execute(db)
+        .await
+        .map_err(|e| format!("Failed to set is_offensive: {}", e))?;
+
+    Ok(())
 }

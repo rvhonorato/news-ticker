@@ -28,6 +28,7 @@ async fn create_test_db() -> Pool<Sqlite> {
                 link TEXT NOT NULL UNIQUE,
                 summary TEXT,
                 current BOOLEAN DEFAULT 0,
+                is_offensive BOOLEAN DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             "#,
@@ -155,6 +156,7 @@ fn test_db_entry_display() {
         "Test Title".to_string(),
         "https://test.com".to_string(),
         "Test Summary".to_string(),
+        false,
     );
 
     let display = entry.display();
@@ -170,6 +172,7 @@ fn test_db_entry_waybar_display() {
         "Test Title".to_string(),
         "https://test.com".to_string(),
         "Test Summary".to_string(),
+        false,
     );
 
     let display = entry.display_waybar();

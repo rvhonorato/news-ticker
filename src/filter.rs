@@ -1,5 +1,6 @@
 //! Content filtering module using Ollama for offensive content detection
 
+use feed_rs::model::Entry;
 use ollama_rs::Ollama;
 use ollama_rs::generation::completion::GenerationResponse;
 use ollama_rs::generation::completion::request::GenerationRequest;
@@ -12,6 +13,7 @@ use tracing::{debug, info};
 pub enum ContentClassification {
     Safe,
     Offensive,
+    Unknown,
 }
 
 impl std::fmt::Display for ContentClassification {
@@ -19,6 +21,7 @@ impl std::fmt::Display for ContentClassification {
         match self {
             ContentClassification::Safe => write!(f, "SAFE"),
             ContentClassification::Offensive => write!(f, "OFFENSIVE"),
+            ContentClassification::Unknown => write!(f, "UNKNOWN"),
         }
     }
 }
@@ -70,10 +73,12 @@ impl ContentFilter {
     }
 
     /// Classify text as safe or offensive using the LLM
-    pub async fn classify(&self, text: &str) -> Result<ContentClassification, Box<dyn Error>> {
-        debug!("Classifying text: {}", text);
-
-        let prompt = self.build_classification_prompt(text);
+    pub async fn classify(&self, entry: &Entry) -> Result<ContentClassification, Box<dyn Error>> {
+        // check if this entry has a title
+        let Some(title_text) = &entry.title else {
+            return Ok(ContentClassification::Unknown);
+        };
+        let prompt = self.build_classification_prompt(&title_text.content);
         let request = GenerationRequest::new(self.model.clone(), prompt).options(
             ModelOptions::default()
                 .temperature(0.0) // Deterministic for classification
@@ -92,13 +97,6 @@ impl ContentFilter {
         } else {
             Ok(ContentClassification::Safe)
         }
-    }
-
-    /// Check if text is offensive (convenience method)
-    pub async fn is_offensive(&self, text: &str) -> Result<bool, Box<dyn Error>> {
-        let result = self.classify(text).await?;
-        debug!("Classification result for '{}': {}", text, result);
-        Ok(result == ContentClassification::Offensive)
     }
 
     /// Build the classification prompt
@@ -146,7 +144,7 @@ mod tests {
     #[test]
     fn test_custom_filter() {
         let filter = ContentFilter::new("custom-model".to_string()).unwrap();
-        assert_eq!(filter.endpoint(), "http://custom:11434/");
+        assert_eq!(filter.endpoint(), "http://localhost:11434/");
         assert_eq!(filter.model(), "custom-model");
     }
 
