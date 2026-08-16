@@ -6,8 +6,8 @@ description = "A CLI news ticker that fetches and displays RSS feeds"
 authors = ["Rodrigo V. Honorato <rvhonorato@pm.me>"]
 license = "0BSD"
 readme = "README.md"
-repository = "https://github.com/rvhonorato/news-ticker"
-homepage = "https://github.com/rvhonorato/news-ticker"
+repository = "https://codeberg.org/rvhonorato/news-ticker"
+homepage = "https://codeberg.org/rvhonorato/news-ticker"
 keywords = ["rss", "news", "cli", "ticker", "feed"]
 categories = ["command-line-utilities"]
 
