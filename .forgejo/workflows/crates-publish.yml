@@ -1,0 +1,40 @@
+name: Publish crate to crates.io
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    runs-on: codeberg-medium
+    container:
+      image: docker.io/library/rust:1
+
+    steps:
+      - name: Checkout code
+        # the remote is the source of truth
+        run: |
+          git init -b main .
+          git remote add origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          git fetch --depth 1 origin "$FORGEJO_SHA"
+          git -c advice.detachedHead=false checkout FETCH_HEAD
+
+      # Fail early if the tag (vX.Y.Z) does not match the version in Cargo.toml
+      - name: Check tag matches Cargo.toml version
+        run: |
+          TAG_VERSION="${FORGEJO_REF_NAME#v}"
+          CRATE_VERSION=$(cargo metadata --no-deps --format-version 1 \
+            | grep -oE '"version":"[^"]+"' | head -1 | cut -d'"' -f4)
+          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+            echo "Tag $FORGEJO_REF_NAME does not match Cargo.toml version $CRATE_VERSION"
+            exit 1
+          fi
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
