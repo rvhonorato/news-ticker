@@ -190,4 +190,34 @@ mod tests {
         assert_eq!(filter.endpoint(), "http://localhost:11434/");
         assert_eq!(filter.model(), "custom-model");
     }
+
+    #[test]
+    fn test_request_building() {
+        let filter = ContentFilter::new("tev1:4b".to_string()).unwrap();
+        let json = serde_json::to_value(filter.build_request("Test news headline")).unwrap();
+
+        assert_eq!(json["model"], "tev1:4b");
+        assert_eq!(json["state"], "Test news headline");
+        assert_eq!(json["questions"]["triggering"]["type"], "noul");
+        assert!(json["questions"]["triggering"]["criteria"]["true"].is_string());
+        assert!(json["questions"]["triggering"]["criteria"]["false"].is_string());
+    }
+
+    #[test]
+    fn test_response_parsing() {
+        let body = r#"{
+            "model": "tev1:4b",
+            "answers": { "triggering": { "type": "noul", "noul": 0.93 } },
+            "usage": { "input_tokens": 41, "output_tokens": 1 }
+        }"#;
+        let response: DecisionResponse = serde_json::from_str(body).unwrap();
+        assert_eq!(response.answers[QUESTION_KEY].noul, 0.93);
+    }
+
+    #[test]
+    fn test_threshold() {
+        assert_eq!(classify_probability(0.93), ContentClassification::Offensive);
+        assert_eq!(classify_probability(0.5), ContentClassification::Offensive);
+        assert_eq!(classify_probability(0.1), ContentClassification::Safe);
+    }
 }
