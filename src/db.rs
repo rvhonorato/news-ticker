@@ -12,6 +12,9 @@ pub struct DbEntry {
     pub is_offensive: bool,
 }
 
+/// Trigger warning shown before offensive titles
+const TW_PREFIX: &str = "⚠️ ";
+
 impl DbEntry {
     pub fn new(title: String, link: String, summary: String, is_offensive: bool) -> Self {
         Self {
@@ -25,7 +28,7 @@ impl DbEntry {
 
 impl DbEntry {
     pub fn display(&self) -> String {
-        let prefix = if self.is_offensive { "[TW] " } else { "" };
+        let prefix = if self.is_offensive { TW_PREFIX } else { "" };
         format!(
             "📰 {}{}\n   {}\n   {}",
             prefix, self.title, self.link, self.summary
@@ -42,7 +45,7 @@ impl DbEntry {
             .replace('\r', "\\r")
             .replace('\t', "\\t");
 
-        let prefix = if self.is_offensive { "[TW] " } else { "" };
+        let prefix = if self.is_offensive { TW_PREFIX } else { "" };
 
         format!(r#"{{"text":"{}{}","class":"feed"}}"#, prefix, escaped_title)
     }
