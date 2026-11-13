@@ -72,8 +72,7 @@ jobs:
           echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${COLOR}\"}" > coverage/badge.json
 
       - name: Deploy coverage report to Codeberg Pages
-        # TODO: remove the coverage-fix clause before merge, it is only to test the deploy on the PR
-        if: (forgejo.event_name == 'push' && forgejo.ref_name == 'main') || forgejo.head_ref == 'coverage-fix'
+        if: forgejo.event_name == 'push' && forgejo.ref_name == 'main'
         env:
           TOKEN: ${{ forgejo.token }}
         # plain CLI that git-pages/action wraps, so the runner needs no docker
