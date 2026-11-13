@@ -36,7 +36,7 @@ fn test_read_feed_urls_with_comments() {
 fn test_read_feed_urls_with_blanks() {
     let mut file = NamedTempFile::new().unwrap();
     writeln!(file, "https://feed1.com/rss").unwrap();
-    writeln!(file, "").unwrap();
+    writeln!(file).unwrap();
     writeln!(file, "   ").unwrap();
     writeln!(file, "https://feed2.com/rss").unwrap();
 
