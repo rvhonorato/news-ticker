@@ -1,6 +1,7 @@
 # `news-ticker`
 
 [![ci](https://codeberg.org/rvhonorato/news-ticker/badges/workflows/ci.yml/badge.svg)](https://codeberg.org/rvhonorato/news-ticker/actions?workflow=ci.yml)
+[![coverage](https://img.shields.io/badge/dynamic/json?url=https://rvhonorato.codeberg.page/news-ticker/coverage/tarpaulin-report.json&query=$.coverage&label=coverage&suffix=%25)](https://rvhonorato.codeberg.page/news-ticker/coverage/tarpaulin-report.html)
 ![Crates.io Version](https://img.shields.io/crates/v/news-ticker)
 
 An overly complicated way for me to keep up with the news.

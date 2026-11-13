@@ -1,0 +1,47 @@
+name: Publish crate to crates.io
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    runs-on: codeberg-medium
+    container:
+      image: docker.io/library/rust:1
+
+    steps:
+      - name: Checkout code
+        # rust:1 has no node, so the checkout action cannot run here
+        run: |
+          git init -b main .
+          git remote add origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          git fetch --depth 1 origin "$FORGEJO_SHA"
+          git -c advice.detachedHead=false checkout FETCH_HEAD
+
+      - name: Check tag matches Cargo.toml version
+        run: |
+          TAG_VERSION="${FORGEJO_REF_NAME#v}"
+          PKGID=$(cargo pkgid)
+          CRATE_VERSION="${PKGID##*[#@]}"
+          if [ "$TAG_VERSION" != "$CRATE_VERSION" ]; then
+            echo "Tag $FORGEJO_REF_NAME does not match Cargo.toml version $CRATE_VERSION"
+            exit 1
+          fi
+
+      - name: Run clippy
+        run: |
+          rustup component add clippy
+          cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked

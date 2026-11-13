@@ -45,7 +45,7 @@ struct Args {
     model: Option<String>,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let verbose = std::env::args().any(|arg| arg == "-v" || arg == "--verbose");
 
