@@ -15,49 +15,31 @@ env:
 jobs:
   ci:
     runs-on: codeberg-medium
-    container:
-      image: docker.io/library/rust:1
 
     steps:
-      - name: Checkout code
-        # the remote is the source of truth
-        run: |
-          git init -b main .
-          git remote add origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
-          git fetch --depth 1 origin "$FORGEJO_SHA"
-          git -c advice.detachedHead=false checkout FETCH_HEAD
+      - uses: https://code.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - name: Setup test env
-        # use prebuilt tarpaulin binary: `cargo install` take 10min+
+      - name: Install Rust
         run: |
-          rustup component add clippy
-          curl -sL https://github.com/xd009642/tarpaulin/releases/latest/download/cargo-tarpaulin-x86_64-unknown-linux-musl.tar.gz | tar xz -C /usr/local/bin
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component clippy
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install tarpaulin
+        # prebuilt binary: `cargo install` takes 10min+
+        run: curl -sL https://github.com/xd009642/tarpaulin/releases/download/0.37.6/cargo-tarpaulin-x86_64-unknown-linux-musl.tar.gz | tar xz -C "$HOME/.cargo/bin"
 
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
       - name: Run tests with coverage
-        run: |
-          set -euo pipefail
-          cargo tarpaulin --engine llvm --exclude-files 'src/main.rs' --out Html --output-dir coverage | tee coverage.log # --fail-under 85
-          mv coverage/tarpaulin-report.html coverage/index.html
-
-          COVERAGE=$(grep -oE '[0-9]+\.[0-9]+% coverage' coverage.log | grep -oE '^[0-9]+\.[0-9]+')
-          COVERAGE_INT=${COVERAGE%.*}
-          if [ "$COVERAGE_INT" -ge 80 ]; then COLOR=brightgreen
-          elif [ "$COVERAGE_INT" -ge 60 ]; then COLOR=yellow
-          elif [ "$COVERAGE_INT" -ge 40 ]; then COLOR=orange
-          else COLOR=red
-          fi
-          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${COLOR}\"}" > coverage/badge.json
+        run: cargo tarpaulin --engine llvm --exclude-files 'src/main.rs' --out Html --out Json --output-dir coverage
 
       - name: Deploy coverage report to Codeberg Pages
         if: forgejo.ref_name == 'main'
-        # git-pages/action is docker-based and can't run inside this container job,
-        # so use the plain git-pages-cli binary it wraps instead (same pattern as tarpaulin above)
+        # plain CLI that git-pages/action wraps, so the runner needs no docker
         run: |
-          curl -sSL -o /usr/local/bin/git-pages-cli https://codeberg.org/git-pages/git-pages-cli/releases/download/latest/git-pages-cli.linux-amd64
-          chmod +x /usr/local/bin/git-pages-cli
+          curl -sSL -o "$HOME/.cargo/bin/git-pages-cli" https://codeberg.org/git-pages/git-pages-cli/releases/download/v1.13.1/git-pages-cli.linux-amd64
+          chmod +x "$HOME/.cargo/bin/git-pages-cli"
           git-pages-cli "https://${{ forgejo.repository_owner }}.codeberg.page/${{ forgejo.event.repository.name }}/" \
             --path=coverage \
             --parents \
