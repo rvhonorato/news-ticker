@@ -57,7 +57,19 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Run tests with coverage
-        run: cargo tarpaulin --engine llvm --exclude-files 'src/main.rs' --out Html --out Json --output-dir coverage
+        run: |
+          set -euo pipefail
+          cargo tarpaulin --engine llvm --exclude-files 'src/main.rs' --out Html --output-dir coverage | tee coverage.log
+          mv coverage/tarpaulin-report.html coverage/index.html
+
+          COVERAGE=$(grep -oE '[0-9]+\.[0-9]+% coverage' coverage.log | grep -oE '^[0-9]+\.[0-9]+')
+          COVERAGE_INT=${COVERAGE%.*}
+          if [ "$COVERAGE_INT" -ge 80 ]; then COLOR=brightgreen
+          elif [ "$COVERAGE_INT" -ge 60 ]; then COLOR=yellow
+          elif [ "$COVERAGE_INT" -ge 40 ]; then COLOR=orange
+          else COLOR=red
+          fi
+          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${COLOR}\"}" > coverage/badge.json
 
       - name: Deploy coverage report to Codeberg Pages
         # TODO: remove the coverage-fix clause before merge, it is only to test the deploy on the PR
