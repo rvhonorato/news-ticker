@@ -1,11 +1,11 @@
 //! Content filtering module using an Ollama decision model for offensive content detection
 
 use feed_rs::model::Entry;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use tracing::{debug, info};
-use url::Url;
 
 /// Titles with P(triggering) at or above this value are marked offensive
 const TRIGGER_THRESHOLD: f64 = 0.5;
