@@ -3,109 +3,53 @@
 [![ci](https://codeberg.org/rvhonorato/news-ticker/badges/workflows/ci.yml/badge.svg)](https://codeberg.org/rvhonorato/news-ticker/actions?workflow=ci.yml)
 ![Crates.io Version](https://img.shields.io/crates/v/news-ticker)
 
-This is an overly complicated way for me to keep up with the news.
+An overly complicated way for me to keep up with the news.
 
-`news-ticker` is a command-line RSS feed reader that fetches news from some
-feeds, stores entries in a local SQLite database, and displays them one at a
-time.
+`news-ticker` reads RSS feeds, keeps the entries in a local SQLite database, and shows them one at a time. I use it in my Waybar.
 
-## Content Filter ( Offensive Content Detection )
-
-news-ticker includes an optional content filter that uses Ollama to detect
-potentially offensive or distressing content in news titles. When offensive
-content is detected, the title is prefixed with `[TW]` (Trigger Warning).
-
-### How It Works
-
-- The content filter uses a local Ollama instance with a language model
-- It is **opt-in**: pass `--model <MODEL>` to enable it. Without `--model`,
-  no filtering is applied
-- If Ollama is not available or the model fails to load, the filter is **skipped
-  automatically** and news is displayed without filtering
-
-### Configuration
-
-The content filter connects to Ollama on `http://localhost:11434` (not
-currently configurable). Specify which model to use via the `--model` flag:
+## Install
 
 ```sh
-news-ticker --model llama3.2:3b --refresh feeds.txt
+cargo install news-ticker
 ```
-
-### Model Requirements
-
-Any Ollama model can be used, but it should be fine-tuned or capable of binary
-classification. The filter works best with models that can respond with short,
-deterministic output.
-
-Make sure the model is pulled in Ollama before using it:
-
-```sh
-ollama pull llama3.2:3b
-```
-
-### Content Classification Criteria
-
-See the PROMPT inside `filter::build_classification_prompt` for more details.
 
 ## Usage
 
-Refresh feed data from a file (one URL per line):
+Put your feeds in a text file, one URL per line. Lines that start with `#` are skipped. See [`feeds.txt`](feeds.txt) for an example.
 
 ```sh
-news-ticker --refresh feeds.txt
+news-ticker --refresh feeds.txt   # fetch new entries
+news-ticker                       # show the current entry
+news-ticker --next                # go to the next entry
+news-ticker --prev                # go to the previous entry
+news-ticker --link                # show only the link
+news-ticker --waybar              # show the entry as Waybar JSON
+news-ticker --purge               # delete all entries
+news-ticker -v ...                # show debug logs
 ```
 
-Refresh with content filtering enabled, using a specific Ollama model:
+The database is at `~/.cache/news-ticker/db.sqlite`. Set `NEWS_TICKER_DB` to use a different file.
+
+## Trigger warnings
+
+`news-ticker` can put ⚠️ in front of titles about death, violence, accidents, disasters and similar news. It uses a small local [Ollama](https://ollama.com) decision model to do this.
 
 ```sh
-news-ticker --model llama3.2:3b --refresh feeds.txt
+ollama pull tev1:4b
+news-ticker --model tev1:4b --refresh feeds.txt
 ```
 
-Display the current news entry:
+Notes:
 
-```sh
-news-ticker
-```
+- Only new entries are checked, during `--refresh`.
+- Normal chat models (for example `llama3.2`) do not work it must use a decision model such as `tev1:4b`.
+- If Ollama is not running, you get a warning and the entries are not marked.
+- The model is not perfect. It works on Dutch titles too, but it sometimes marks harmless titles with words like "doom" or "crash".
+- The question it asks is in `ContentFilter::build_request` in [`src/filter.rs`](src/filter.rs).
 
-Display only the URL of the current entry:
+## Waybar
 
-```sh
-news-ticker --link
-```
-
-Navigate entries:
-
-```sh
-news-ticker --next   # Go to next entry
-news-ticker --prev   # Go to previous entry (alias for --previous)
-```
-
-Output in Waybar JSON format:
-
-```sh
-news-ticker --waybar
-```
-
-Delete all entries:
-
-```sh
-news-ticker --purge
-```
-
-### Verbose Mode
-
-For debugging content filter issues, use the `-v` flag:
-
-```sh
-news-ticker -v --refresh feeds.txt
-```
-
-This shows detailed logs about content classification and any errors from Ollama.
-
-## Waybar Integration
-
-Add a custom module to your Waybar `config.jsonc`:
+Add this module to your Waybar `config.jsonc`:
 
 ```jsonc
 "custom/news-ticker": {
@@ -120,14 +64,22 @@ Add a custom module to your Waybar `config.jsonc`:
 }
 ```
 
-### Recommended Crontab
-
-For auto-advance and periodic refresh, add to your crontab (`crontab -e`):
+To go to the next entry every minute and fetch feeds every 20 minutes, add this to your crontab (`crontab -e`):
 
 ```cron
-# Auto-advance to next entry every minute
-* * * * * /home/rodrigo/.cargo/bin/news-ticker --next
-
-# Refresh feeds every 20 minutes
-*/20 * * * * /home/rodrigo/.cargo/bin/news-ticker --refresh $HOME/feeds.txt
+* * * * * $HOME/.cargo/bin/news-ticker --next
+*/20 * * * * $HOME/.cargo/bin/news-ticker --model tev1:4b --refresh $HOME/feeds.txt
 ```
+
+## Contributing
+
+Issues and pull requests are welcome on [Codeberg](https://codeberg.org/rvhonorato/news-ticker). Before you open a pull request, make sure that these pass:
+
+```sh
+cargo test
+cargo clippy -- -D warnings
+```
+
+## License
+
+[0BSD](LICENSE). Do what you want with it.
