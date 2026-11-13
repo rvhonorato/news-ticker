@@ -60,7 +60,8 @@ jobs:
         run: cargo tarpaulin --engine llvm --exclude-files 'src/main.rs' --out Html --out Json --output-dir coverage
 
       - name: Deploy coverage report to Codeberg Pages
-        if: forgejo.event_name == 'push' && forgejo.ref_name == 'main'
+        # TODO: remove the coverage-fix clause before merge, it is only to test the deploy on the PR
+        if: (forgejo.event_name == 'push' && forgejo.ref_name == 'main') || forgejo.head_ref == 'coverage-fix'
         env:
           TOKEN: ${{ forgejo.token }}
         # plain CLI that git-pages/action wraps, so the runner needs no docker
@@ -69,7 +70,5 @@ jobs:
           echo "$GIT_PAGES_CLI_SHA256  $HOME/.cargo/bin/git-pages-cli" | sha256sum -c -
           chmod +x "$HOME/.cargo/bin/git-pages-cli"
           git-pages-cli "https://${{ forgejo.repository_owner }}.codeberg.page/${{ forgejo.event.repository.name }}/" \
-            --path=coverage \
-            --parents \
             --token="$TOKEN" \
             --upload-dir=coverage/
