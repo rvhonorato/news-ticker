@@ -40,7 +40,7 @@ struct Args {
     #[arg(long)]
     purge: bool,
 
-    /// Model to be used
+    /// Ollama decision model (for example tev1:4b)
     #[arg(long)]
     model: Option<String>,
 }

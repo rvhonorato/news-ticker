@@ -125,7 +125,7 @@ impl ContentFilter {
     /// Build the decision request for one title
     fn build_request(&self, text: &str) -> DecisionRequest {
         let question = Question {
-            kind: "noul",
+            kind: "noul", // noul = yes/no
             instructions: "Is this news headline about a traumatic or distressing event? \
                  The headline may be in any language, including Dutch, English, German, French or Spanish.",
             criteria: HashMap::from([
