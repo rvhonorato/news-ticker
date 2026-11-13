@@ -1,12 +1,17 @@
-//! Content filtering module using Ollama for offensive content detection
+//! Content filtering module using an Ollama decision model for offensive content detection
 
 use feed_rs::model::Entry;
-use ollama_rs::Ollama;
-use ollama_rs::generation::completion::GenerationResponse;
-use ollama_rs::generation::completion::request::GenerationRequest;
-use ollama_rs::models::ModelOptions;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::error::Error;
 use tracing::{debug, info};
+use url::Url;
+
+/// Titles with P(triggering) at or above this value are marked offensive
+const TRIGGER_THRESHOLD: f64 = 0.5;
+
+/// Name of the question in the decision request, used to find the answer
+const QUESTION_KEY: &str = "triggering";
 
 /// Classification result
 #[derive(Debug, Clone, PartialEq)]
@@ -26,10 +31,38 @@ impl std::fmt::Display for ContentClassification {
     }
 }
 
-/// Content filter using Ollama for LLM-based classification
+/// Request body for `POST /v1/systemone`
+#[derive(Debug, Serialize)]
+struct DecisionRequest {
+    model: String,
+    state: String,
+    questions: HashMap<&'static str, Question>,
+}
+
+#[derive(Debug, Serialize)]
+struct Question {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    instructions: &'static str,
+    criteria: HashMap<&'static str, &'static str>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DecisionResponse {
+    answers: HashMap<String, Answer>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Answer {
+    /// Probability that the statement is true
+    noul: f64,
+}
+
+/// Content filter using an Ollama decision model (for example tev1)
 #[derive(Debug, Clone)]
 pub struct ContentFilter {
-    ollama: Ollama,
+    client: reqwest::Client,
+    base_url: Url,
     model: String,
 }
 
@@ -39,7 +72,8 @@ impl ContentFilter {
         info!("Initializing content filter with default settings");
 
         Ok(Self {
-            ollama: Ollama::try_new("http://localhost:11434")?,
+            client: reqwest::Client::new(),
+            base_url: Url::parse("http://localhost:11434")?,
             model,
         })
     }
@@ -47,20 +81,9 @@ impl ContentFilter {
     /// Check if Ollama is running and accessible
     pub async fn check_health(&self) -> Result<bool, Box<dyn Error>> {
         debug!("Checking Ollama health at {}", self.endpoint());
-        // Try to ping the Ollama tags endpoint
-        // Note: The underlying Ollama client uses reqwest with a default timeout
-        // For slow models or large downloads, you may need to increase the timeout
-        // by rebuilding with a custom reqwest client (see reqwest 0.12 docs for timeout config)
-        let client = reqwest::Client::new();
-        let url = format!(
-            "{}://{}:{}/api/tags",
-            self.ollama.url().scheme(),
-            self.ollama.url().host_str().unwrap_or("localhost"),
-            self.ollama.url().port_or_known_default().unwrap_or(11434)
-        );
-
-        let response = client
-            .get(&url)
+        let response = self
+            .client
+            .get(self.base_url.join("api/tags")?)
             .timeout(std::time::Duration::from_secs(60))
             .send()
             .await;
@@ -72,45 +95,57 @@ impl ContentFilter {
         Ok(is_healthy)
     }
 
-    /// Classify text as safe or offensive using the LLM
+    /// Classify text as safe or offensive using the decision model
     pub async fn classify(&self, entry: &Entry) -> Result<ContentClassification, Box<dyn Error>> {
-        // check if this entry has a title
         let Some(title_text) = &entry.title else {
             return Ok(ContentClassification::Unknown);
         };
-        let prompt = self.build_classification_prompt(&title_text.content);
-        let request = GenerationRequest::new(self.model.clone(), prompt).options(
-            ModelOptions::default()
-                .temperature(0.0) // Deterministic for classification
-                .num_predict(32), // Enough for "SAFE" or "OFFENSIVE"
-        );
+        let request = self.build_request(&title_text.content);
 
-        let response: GenerationResponse = self.ollama.generate(request).await?;
-        debug!(
-            "LLM model: {}, response: '{}', done: {}",
-            response.model, response.response, response.done
-        );
-        let output = response.response.to_uppercase();
+        let response: DecisionResponse = self
+            .client
+            .post(self.base_url.join("v1/systemone")?)
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
 
-        if output.contains("OFFENSIVE") {
-            Ok(ContentClassification::Offensive)
-        } else {
-            Ok(ContentClassification::Safe)
-        }
+        let p = response
+            .answers
+            .get(QUESTION_KEY)
+            .ok_or("decision response has no 'triggering' answer")?
+            .noul;
+        debug!("Model: {}, P(triggering)={:.3}", self.model, p);
+
+        Ok(classify_probability(p))
     }
 
-    /// Build the classification prompt
-    fn build_classification_prompt(&self, text: &str) -> String {
-        format!(
-            "You are a content filter for a news ticker application. \
-             The text may be in any language including Dutch, English, German, French, Spanish, or other languages. \
-             Classify the following text as OFFENSIVE or SAFE. \
-             Mark as OFFENSIVE if the text contains: death, killing, murder, violence, accident, disaster, catastrophe, tragedy, trauma, or any graphic/horrific content. \
-             This includes news about fatalities, violent crimes, accidents, natural disasters, and other traumatic events. \
-             Text about politics, economics, sports, culture, or non-traumatic news should be marked SAFE. \
-             Respond with ONLY the word OFFENSIVE or SAFE, with no other text or explanations.\n\nText: {}",
-            text
-        )
+    /// Build the decision request for one title
+    fn build_request(&self, text: &str) -> DecisionRequest {
+        let question = Question {
+            kind: "noul",
+            instructions: "Is this news headline about a traumatic or distressing event? \
+                 The headline may be in any language, including Dutch, English, German, French or Spanish.",
+            criteria: HashMap::from([
+                (
+                    "true",
+                    "The headline is about death, killing, murder, violence, accidents, \
+                     natural disasters, catastrophes, tragedies, trauma, or other graphic content.",
+                ),
+                (
+                    "false",
+                    "The headline is about politics, economics, sports, culture, or other non-traumatic news.",
+                ),
+            ]),
+        };
+
+        DecisionRequest {
+            model: self.model.clone(),
+            state: text.to_string(),
+            questions: HashMap::from([(QUESTION_KEY, question)]),
+        }
     }
 
     /// Get the current model name
@@ -120,7 +155,15 @@ impl ContentFilter {
 
     /// Get the Ollama URL
     pub fn endpoint(&self) -> String {
-        self.ollama.url().to_string()
+        self.base_url.to_string()
+    }
+}
+
+fn classify_probability(p: f64) -> ContentClassification {
+    if p >= TRIGGER_THRESHOLD {
+        ContentClassification::Offensive
+    } else {
+        ContentClassification::Safe
     }
 }
 
@@ -146,15 +189,5 @@ mod tests {
         let filter = ContentFilter::new("custom-model".to_string()).unwrap();
         assert_eq!(filter.endpoint(), "http://localhost:11434/");
         assert_eq!(filter.model(), "custom-model");
-    }
-
-    #[test]
-    fn test_prompt_building() {
-        let filter = ContentFilter::new("something".to_string()).unwrap();
-        let text = "Test news headline";
-        let prompt = filter.build_classification_prompt(text);
-
-        assert!(prompt.contains("Test news headline"));
-        assert!(prompt.contains("OFFENSIVE or SAFE"));
     }
 }
