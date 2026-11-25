@@ -1,4 +1,8 @@
-use news_ticker::db::{DbEntry, advance_to_next, get_current, go_to_previous, init_current_entry, purge_db};
+use feed_rs::parser;
+use news_ticker::db::{
+    DbEntry, add_entry_to_db, advance_to_next, entry_exists, get_current, go_to_previous,
+    init_current_entry, purge_db,
+};
 use sqlx::{Pool, Sqlite, sqlite::SqlitePoolOptions};
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -217,4 +221,59 @@ async fn test_purge_db() {
     // Verify get_current returns None
     let current = get_current(&db).await.unwrap();
     assert!(current.is_none());
+}
+
+const RSS: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example RSS</title>
+    <link>https://example.com/</link>
+    <description>Test feed</description>
+    <item>
+      <title>First item</title>
+      <link>https://example.com/rss/1</link>
+      <description>Summary 1</description>
+    </item>
+    <item>
+      <title>Second item</title>
+      <link>https://example.com/rss/2</link>
+      <description>Summary 2</description>
+    </item>
+  </channel>
+</rss>"#;
+
+async fn count_entries(db: &Pool<Sqlite>) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM entries")
+        .fetch_one(db)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_add_entry_stores_offensive_flag() {
+    let db = create_test_db().await;
+    let entries = parser::parse(RSS.as_bytes()).unwrap().entries;
+
+    assert!(add_entry_to_db(&db, &entries[0], true).await.unwrap());
+    assert!(add_entry_to_db(&db, &entries[1], false).await.unwrap());
+    // Same link again is ignored
+    assert!(!add_entry_to_db(&db, &entries[0], false).await.unwrap());
+    assert_eq!(count_entries(&db).await, 2);
+
+    init_current_entry(&db).await.unwrap();
+    let first = get_current(&db).await.unwrap().unwrap();
+    assert!(first.is_offensive);
+    let second = advance_to_next(&db).await.unwrap().unwrap();
+    assert!(!second.is_offensive);
+}
+
+#[tokio::test]
+async fn test_entry_exists() {
+    let db = create_test_db().await;
+    let entries = parser::parse(RSS.as_bytes()).unwrap().entries;
+
+    assert!(!entry_exists(&db, &entries[0]).await.unwrap());
+    add_entry_to_db(&db, &entries[0], false).await.unwrap();
+    assert!(entry_exists(&db, &entries[0]).await.unwrap());
+    assert!(!entry_exists(&db, &entries[1]).await.unwrap());
 }
