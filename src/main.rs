@@ -1,9 +1,7 @@
 use clap::Parser;
-use news_ticker::db::{
-    advance_to_next, get_current, go_to_previous, init_db, purge_db, set_offensive,
-};
+use news_ticker::db::{advance_to_next, get_current, go_to_previous, init_db, purge_db};
 use news_ticker::feed::{Fetcher, read_feed_urls};
-use news_ticker::filter::{ContentClassification, ContentFilter};
+use news_ticker::filter::ContentFilter;
 use tracing::{info, warn};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::SubscriberBuilder;
@@ -76,27 +74,17 @@ async fn main() {
     if let Some(feeds_file) = args.refresh {
         // Refresh
         let urls = read_feed_urls(&feeds_file).expect("Failed to read feeds file");
-        let new_inserts = fetcher.refresh(urls).await.unwrap();
+        let filter = args
+            .model
+            .map(|model| ContentFilter::new(model).expect("Failed to init content filter"));
+        if filter.is_none() {
+            warn!("No --model given, skipping content filter");
+        }
+        let new_inserts = fetcher.refresh(urls, filter.as_ref()).await.unwrap();
         info!(
             "Refreshed feed data - added {} new entries",
             new_inserts.len()
         );
-
-        // Try to apply content filter
-        if let Some(model) = args.model {
-            let filter = ContentFilter::new(model).expect("Failed to init content filter");
-            for entry in &new_inserts {
-                match filter.classify(entry).await {
-                    Ok(ContentClassification::Offensive) => {
-                        set_offensive(&fetcher.db, entry, true).await.unwrap();
-                    }
-                    Ok(_) => {}
-                    Err(e) => warn!("Classification failed: {}", e),
-                }
-            }
-        } else {
-            warn!("No --model given, skipping content filter");
-        }
         std::process::exit(0);
     }
 

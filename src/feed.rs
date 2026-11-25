@@ -5,7 +5,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use super::db::{add_entry_to_db, init_current_entry};
+use super::db::{add_entry_to_db, entry_exists, init_current_entry};
+use super::filter::{ContentClassification, ContentFilter};
 use tracing::{debug, info, warn};
 
 /// Reads feed URLs from a file, one per line
@@ -55,7 +56,13 @@ impl Fetcher {
         }
     }
 
-    pub async fn refresh(&mut self, urls: Vec<String>) -> Result<Vec<Entry>, String> {
+    /// Fetches the feeds and stores the new entries. With a filter, each new
+    /// entry is classified before it goes into the database.
+    pub async fn refresh(
+        &mut self,
+        urls: Vec<String>,
+        filter: Option<&ContentFilter>,
+    ) -> Result<Vec<Entry>, String> {
         info!("Starting feed refresh for {} URLs", urls.len());
         let mut all_entries = Vec::new();
         for url in &urls {
@@ -75,7 +82,21 @@ impl Fetcher {
 
         let mut new_entries = Vec::<Entry>::new();
         for entry in all_entries {
-            if add_entry_to_db(&self.db, &entry).await? {
+            // Only classify entries we do not have yet, to keep the Ollama calls few
+            if entry_exists(&self.db, &entry).await? {
+                continue;
+            }
+            let is_offensive = match filter {
+                Some(filter) => match filter.classify(&entry).await {
+                    Ok(classification) => classification == ContentClassification::Offensive,
+                    Err(e) => {
+                        warn!("Classification failed: {}", e);
+                        false
+                    }
+                },
+                None => false,
+            };
+            if add_entry_to_db(&self.db, &entry, is_offensive).await? {
                 new_entries.push(entry);
             }
         }
