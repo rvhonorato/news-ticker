@@ -57,11 +57,13 @@ impl Fetcher {
     }
 
     /// Fetches the feeds and stores the new entries. With a filter, each new
-    /// entry is classified before it goes into the database.
+    /// entry is classified before it goes into the database, and with
+    /// `skip_offensive` the offensive ones are not stored at all.
     pub async fn refresh(
         &mut self,
         urls: Vec<String>,
         filter: Option<&ContentFilter>,
+        skip_offensive: bool,
     ) -> Result<Vec<Entry>, String> {
         info!("Starting feed refresh for {} URLs", urls.len());
         let mut all_entries = Vec::new();
@@ -81,6 +83,7 @@ impl Fetcher {
         info!("Total entries collected: {}", self.entries.len());
 
         let mut new_entries = Vec::<Entry>::new();
+        let mut skipped = 0;
         for entry in all_entries {
             // Only classify entries we do not have yet, to keep the Ollama calls few
             if entry_exists(&self.db, &entry).await? {
@@ -96,9 +99,22 @@ impl Fetcher {
                 },
                 None => false,
             };
+            // Not stored, so the next refresh classifies it again
+            if is_offensive && skip_offensive {
+                debug!(
+                    "Skipping entry with trigger warning: {}",
+                    entry_title(&entry)
+                );
+                skipped += 1;
+                continue;
+            }
             if add_entry_to_db(&self.db, &entry, is_offensive).await? {
                 new_entries.push(entry);
             }
+        }
+
+        if skipped > 0 {
+            info!("Skipped {} entries with a trigger warning", skipped);
         }
 
         // Initialize current entry after adding new entries
@@ -130,4 +146,8 @@ impl Fetcher {
 
         Ok(feed.entries)
     }
+}
+
+fn entry_title(entry: &Entry) -> &str {
+    entry.title.as_ref().map_or("", |t| t.content.as_str())
 }

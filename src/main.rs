@@ -41,6 +41,10 @@ struct Args {
     /// Ollama decision model (for example tev1:4b)
     #[arg(long)]
     model: Option<String>,
+
+    /// Do not store new entries that the model marks with a trigger warning
+    #[arg(long, requires_all = ["model", "refresh"])]
+    skip_tw: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -80,7 +84,10 @@ async fn main() {
         if filter.is_none() {
             warn!("No --model given, skipping content filter");
         }
-        let new_inserts = fetcher.refresh(urls, filter.as_ref()).await.unwrap();
+        let new_inserts = fetcher
+            .refresh(urls, filter.as_ref(), args.skip_tw)
+            .await
+            .unwrap();
         info!(
             "Refreshed feed data - added {} new entries",
             new_inserts.len()
@@ -112,5 +119,28 @@ async fn main() {
                 warn!("No entries in database!");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_tw_needs_model_and_refresh() {
+        assert!(Args::try_parse_from(["news-ticker", "--skip-tw"]).is_err());
+        assert!(Args::try_parse_from(["news-ticker", "--skip-tw", "--refresh", "f.txt"]).is_err());
+        assert!(Args::try_parse_from(["news-ticker", "--skip-tw", "--model", "m"]).is_err());
+
+        let args = Args::try_parse_from([
+            "news-ticker",
+            "--skip-tw",
+            "--model",
+            "m",
+            "--refresh",
+            "f.txt",
+        ])
+        .unwrap();
+        assert!(args.skip_tw);
     }
 }
