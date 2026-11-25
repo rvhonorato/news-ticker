@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use std::error::Error;
 use tracing::{debug, info};
 
-/// Titles with P(triggering) at or above this value are marked offensive
-const TRIGGER_THRESHOLD: f64 = 0.5;
+/// Titles with P(triggering) at or above this value are marked offensive.
+/// With tev1:4b, 0.5 to 0.7 was mostly false positives (metaphors, damage
+/// without victims, science) and almost no real cases.
+const TRIGGER_THRESHOLD: f64 = 0.7;
 
 /// Name of the question in the decision request, used to find the answer
 const QUESTION_KEY: &str = "triggering";
@@ -217,7 +219,8 @@ mod tests {
     #[test]
     fn test_threshold() {
         assert_eq!(classify_probability(0.93), ContentClassification::Offensive);
-        assert_eq!(classify_probability(0.5), ContentClassification::Offensive);
+        assert_eq!(classify_probability(0.7), ContentClassification::Offensive);
+        assert_eq!(classify_probability(0.69), ContentClassification::Safe);
         assert_eq!(classify_probability(0.1), ContentClassification::Safe);
     }
 }

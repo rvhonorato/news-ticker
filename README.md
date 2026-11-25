@@ -40,11 +40,18 @@ ollama pull tev1:4b
 news-ticker --model tev1:4b --refresh feeds.txt
 ```
 
+To not store these entries at all, add `--skip-tw`:
+
+```sh
+news-ticker --model tev1:4b --skip-tw --refresh feeds.txt
+```
+
 Notes:
 
 - Only new entries are checked, during `--refresh`.
 - Normal chat models (for example `llama3.2`) do not work it must use a decision model such as `tev1:4b`.
 - If Ollama is not running, you get a warning and the entries are not marked.
+- `--skip-tw` needs `--model` and `--refresh`. A skipped entry is not stored, so the model checks it again at each refresh until it leaves the feed.
 - The model is not perfect. It works on Dutch titles too, but it sometimes marks harmless titles with words like "doom" or "crash".
 - The question it asks is in `ContentFilter::build_request` in [`src/filter.rs`](src/filter.rs).
 

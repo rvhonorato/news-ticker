@@ -108,17 +108,17 @@ pub async fn init_db() -> Result<Pool<Sqlite>, String> {
 }
 
 /// Adds an entry to the database. Returns true if inserted, false if duplicate was ignored.
-pub async fn add_entry_to_db(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, String> {
+pub async fn add_entry_to_db(
+    db: &Pool<Sqlite>,
+    entry: &Entry,
+    is_offensive: bool,
+) -> Result<bool, String> {
     let title = entry
         .title
         .as_ref()
         .map(|t| t.content.clone())
         .unwrap_or_default();
-    let link = entry
-        .links
-        .first()
-        .map(|l| l.href.clone())
-        .unwrap_or_default();
+    let link = entry_link(entry);
     let summary = entry
         .summary
         .as_ref()
@@ -130,13 +130,14 @@ pub async fn add_entry_to_db(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, S
     // Use INSERT OR IGNORE to skip duplicates (based on unique link)
     let result = sqlx::query(
         r#"
-                INSERT OR IGNORE INTO entries (title, link, summary)
-                VALUES (?, ?, ?)
+                INSERT OR IGNORE INTO entries (title, link, summary, is_offensive)
+                VALUES (?, ?, ?, ?)
                 "#,
     )
     .bind(title)
     .bind(link)
     .bind(summary)
+    .bind(is_offensive)
     .execute(db)
     .await
     .map_err(|e| format!("Failed to insert entry: {}", e))?;
@@ -322,24 +323,22 @@ pub async fn go_to_previous(db: &Pool<Sqlite>) -> Result<Option<DbEntry>, String
     }
 }
 
-/// Mark an entry as offensive (or not) by looking up its link
-pub async fn set_offensive(
-    db: &Pool<Sqlite>,
-    entry: &Entry,
-    is_offensive: bool,
-) -> Result<(), String> {
-    let link = entry
+/// True if an entry with the same link is already in the database
+pub async fn entry_exists(db: &Pool<Sqlite>, entry: &Entry) -> Result<bool, String> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entries WHERE link = ?")
+        .bind(entry_link(entry))
+        .fetch_one(db)
+        .await
+        .map_err(|e| format!("Failed to look up entry: {}", e))?;
+
+    Ok(count > 0)
+}
+
+/// The link is the unique key of an entry in the database
+fn entry_link(entry: &Entry) -> String {
+    entry
         .links
         .first()
         .map(|l| l.href.clone())
-        .unwrap_or_default();
-
-    sqlx::query("UPDATE entries SET is_offensive = ? WHERE link = ?")
-        .bind(is_offensive)
-        .bind(link)
-        .execute(db)
-        .await
-        .map_err(|e| format!("Failed to set is_offensive: {}", e))?;
-
-    Ok(())
+        .unwrap_or_default()
 }

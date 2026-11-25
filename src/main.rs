@@ -1,9 +1,7 @@
 use clap::Parser;
-use news_ticker::db::{
-    advance_to_next, get_current, go_to_previous, init_db, purge_db, set_offensive,
-};
+use news_ticker::db::{advance_to_next, get_current, go_to_previous, init_db, purge_db};
 use news_ticker::feed::{Fetcher, read_feed_urls};
-use news_ticker::filter::{ContentClassification, ContentFilter};
+use news_ticker::filter::ContentFilter;
 use tracing::{info, warn};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::SubscriberBuilder;
@@ -43,6 +41,10 @@ struct Args {
     /// Ollama decision model (for example tev1:4b)
     #[arg(long)]
     model: Option<String>,
+
+    /// Do not store new entries that the model marks with a trigger warning
+    #[arg(long, requires_all = ["model", "refresh"])]
+    skip_tw: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -76,27 +78,20 @@ async fn main() {
     if let Some(feeds_file) = args.refresh {
         // Refresh
         let urls = read_feed_urls(&feeds_file).expect("Failed to read feeds file");
-        let new_inserts = fetcher.refresh(urls).await.unwrap();
+        let filter = args
+            .model
+            .map(|model| ContentFilter::new(model).expect("Failed to init content filter"));
+        if filter.is_none() {
+            warn!("No --model given, skipping content filter");
+        }
+        let new_inserts = fetcher
+            .refresh(urls, filter.as_ref(), args.skip_tw)
+            .await
+            .unwrap();
         info!(
             "Refreshed feed data - added {} new entries",
             new_inserts.len()
         );
-
-        // Try to apply content filter
-        if let Some(model) = args.model {
-            let filter = ContentFilter::new(model).expect("Failed to init content filter");
-            for entry in &new_inserts {
-                match filter.classify(entry).await {
-                    Ok(ContentClassification::Offensive) => {
-                        set_offensive(&fetcher.db, entry, true).await.unwrap();
-                    }
-                    Ok(_) => {}
-                    Err(e) => warn!("Classification failed: {}", e),
-                }
-            }
-        } else {
-            warn!("No --model given, skipping content filter");
-        }
         std::process::exit(0);
     }
 
@@ -124,5 +119,28 @@ async fn main() {
                 warn!("No entries in database!");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_tw_needs_model_and_refresh() {
+        assert!(Args::try_parse_from(["news-ticker", "--skip-tw"]).is_err());
+        assert!(Args::try_parse_from(["news-ticker", "--skip-tw", "--refresh", "f.txt"]).is_err());
+        assert!(Args::try_parse_from(["news-ticker", "--skip-tw", "--model", "m"]).is_err());
+
+        let args = Args::try_parse_from([
+            "news-ticker",
+            "--skip-tw",
+            "--model",
+            "m",
+            "--refresh",
+            "f.txt",
+        ])
+        .unwrap();
+        assert!(args.skip_tw);
     }
 }
